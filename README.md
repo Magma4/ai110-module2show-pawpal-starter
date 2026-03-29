@@ -48,6 +48,11 @@ The suite in `tests/test_pawpal.py` exercises **owner / pet / task** relationshi
 
 **Confidence level (reliability):** ★★★★☆ **(4 / 5)** — Domain logic and scheduler edge cases are well covered by automated tests; remaining gaps include full Streamlit interaction tests and very large task lists in performance scenarios.
 
+## Architecture (UML)
+
+- **Raster overview:** `uml_final.png` (repo root)
+- **Mermaid source:** `docs/uml_final.mmd` and the narrative in `docs/pawpal-class-diagram.md` (export via [Mermaid Live Editor](https://mermaid.live) if you need a new PNG; CLI `mmdc` requires a working Chromium/Puppeteer setup)
+
 ## Getting started
 
 ### Setup

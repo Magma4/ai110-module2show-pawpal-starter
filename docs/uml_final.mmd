@@ -1,12 +1,4 @@
-# PawPal+ — UML class diagram (Mermaid)
-
-**Final diagram (Phase 6):** see `uml_final.png` at the repo root (raster summary) and `docs/uml_final.mmd` (Mermaid source). Edit the `.mmd` file and export via [Mermaid Live Editor](https://mermaid.live) if you need a refreshed PNG without Puppeteer.
-
-Preview the Mermaid below in VS Code or paste into Mermaid Live.
-
-## Final architecture (matches `pawpal_system.py`)
-
-```mermaid
+%% PawPal+ final architecture (matches pawpal_system.py)
 classDiagram
     direction TB
 
@@ -65,18 +57,3 @@ classDiagram
     Pet "1" *-- "0..*" Task : tasks
     Scheduler ..> Owner : reads budget
     Scheduler ..> Task : plans / filters / overlaps
-```
-
-### What changed since Phase 1
-
-- **Task** now includes `time_str`, `time_sort_key`, and richer `mark_complete` (recurring follow-ups).
-- **Pet** explicitly holds `tasks` and `add_task` / `remove_task`.
-- **Scheduler** gained `sort_by_time`, `filter_tasks`, `detect_time_overlaps`, and `tasks_for_owner` / `collect_tasks_for_day` in addition to `build_daily_plan` and `detect_conflicts`.
-
-Helper functions `_hhmm_sort_key` and `_interval_for_day` are module-level (not shown in the diagram).
-
-## Review checklist
-
-- **Owner has Pets** — matches “household with multiple animals.”
-- **Pet has Tasks** — tasks are anchored to a pet.
-- **Scheduler stays a service** — depends on Owner and Task without owning the graph.

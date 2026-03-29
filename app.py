@@ -1,5 +1,5 @@
 import streamlit as st
-from datetime import date
+from datetime import date, datetime
 
 from pawpal_system import Owner, Pet, Scheduler, Task
 
@@ -16,6 +16,8 @@ if "owner" not in st.session_state:
     st.session_state.owner = Owner("Jordan", available_minutes=60)
 
 owner: Owner = st.session_state.owner
+today = date.today()
+scheduler = Scheduler()
 
 st.divider()
 st.subheader("Owner")
@@ -33,7 +35,6 @@ with col_o2:
         key="owner_minutes_input",
     )
 
-# Sync widgets → Owner on every run (Streamlit reruns the script; session_state keeps the object)
 owner.name = name_in.strip() or "Owner"
 try:
     owner.register()
@@ -88,28 +89,65 @@ else:
         t_pri = st.selectbox(
             "Priority", ["low", "medium", "high"], index=2, key="task_pri_new"
         )
+        t_time = st.text_input(
+            "Time today (optional, HH:MM)",
+            placeholder="08:30",
+            help="Used for sorting and overlap checks on today's date.",
+            key="task_time_str",
+        )
+        t_rec = st.selectbox(
+            "Repeat",
+            ["—", "daily", "weekly"],
+            help="Daily/weekly tasks spawn the next occurrence when marked complete.",
+            key="task_recurrence",
+        )
         add_task_submitted = st.form_submit_button("Add task")
 
     if add_task_submitted:
         pet_pick = pet_choices[int(pet_idx)]
-        task = Task(
-            t_title.strip() or "Task",
-            duration_minutes=int(t_dur),
-            priority=_priority_to_int[t_pri],
-        )
-        pet_pick.add_task(task)
-        st.success(f"Added “{task.title}” for {pet_pick.name}.")
+        rec = "" if t_rec == "—" else t_rec
+        due: datetime | None = None
+        ts = (t_time or "").strip()
+        parse_error = False
+        if ts:
+            if ":" not in ts:
+                parse_error = True
+                st.warning("Time must look like HH:MM (e.g. 08:30).")
+            else:
+                try:
+                    h, m = ts.split(":", 1)
+                    due = datetime.combine(
+                        today, datetime.min.time().replace(hour=int(h), minute=int(m))
+                    )
+                except ValueError:
+                    parse_error = True
+                    st.warning("Could not parse time — use HH:MM (e.g. 08:30).")
+        if not parse_error:
+            task = Task(
+                t_title.strip() or "Task",
+                duration_minutes=int(t_dur),
+                priority=_priority_to_int[t_pri],
+                due=due,
+                time_str="" if due else ts,
+                recurrence=rec,
+            )
+            pet_pick.add_task(task)
+            st.success(f"Added “{task.title}” for {pet_pick.name}.")
 
 st.markdown("**Current tasks**")
 rows: list[dict[str, str | int]] = []
 for pet in owner.pets:
     for t in pet.tasks:
+        when = t.due.strftime("%Y-%m-%d %H:%M") if t.due else (t.time_str or "—")
         rows.append(
             {
                 "Pet": pet.name,
                 "Title": t.title,
+                "When": when,
                 "Minutes": t.duration_minutes,
                 "Priority": t.priority,
+                "Repeat": t.recurrence or "—",
+                "Status": t.status,
             }
         )
 if rows:
@@ -117,12 +155,60 @@ if rows:
 else:
     st.info("No tasks yet.")
 
+# --- Algorithmic layer: filter, sort, conflicts (always reflect latest data) ---
 st.divider()
-st.subheader("Today’s schedule")
+st.subheader("Smart scheduling")
+
+pending = scheduler.filter_tasks(owner.all_tasks(), status="pending")
+by_time = scheduler.sort_by_time(pending)
+
+if by_time:
+    st.markdown("**Pending tasks by time today**")
+    view = []
+    for t in by_time:
+        pet_name = t.pet.name if t.pet else "—"
+        if t.due and t.due.date() == today:
+            when = t.due.strftime("%H:%M")
+        elif t.due:
+            when = t.due.strftime("%Y-%m-%d %H:%M")
+        else:
+            when = t.time_str or "—"
+        view.append(
+            {
+                "When": when,
+                "Task": t.title,
+                "Pet": pet_name,
+                "Min": t.duration_minutes,
+                "Pri": t.priority,
+            }
+        )
+    st.table(view)
+else:
+    st.caption("No pending tasks to sort.")
+
+overlap_msgs = scheduler.detect_time_overlaps(pending, plan_date=today)
+if overlap_msgs:
+    st.warning(
+        "**Overlapping times** — two or more tasks need you at the same clock time. "
+        "Consider moving one task, shortening duration, or splitting care between people."
+    )
+    for msg in overlap_msgs:
+        st.warning("⚠️ " + msg)
+else:
+    st.success("No time overlaps detected for tasks that have a time set for today.")
+
+budget_msgs = scheduler.detect_conflicts(owner)
+if budget_msgs:
+    for msg in budget_msgs:
+        st.warning("⏱️ " + msg)
+else:
+    st.caption("Total pending work fits your available minutes (or no timed workload conflict).")
+
+st.divider()
+st.subheader("Today’s plan")
 
 if st.button("Generate schedule", key="gen_schedule"):
-    scheduler = Scheduler()
-    planned, messages = scheduler.build_daily_plan(owner, plan_date=date.today())
+    planned, messages = scheduler.build_daily_plan(owner, plan_date=today)
     st.session_state.last_plan = planned
     st.session_state.last_plan_messages = messages
 
@@ -130,12 +216,40 @@ if "last_plan" in st.session_state:
     planned = st.session_state.last_plan
     msgs = st.session_state.get("last_plan_messages", [])
     if planned:
-        st.success(f"Planned {len(planned)} task(s) within {owner.available_minutes} min.")
+        st.success(
+            f"**{len(planned)} task(s)** lined up for today within **{owner.available_minutes} min** available."
+        )
+        plan_rows = []
         for i, task in enumerate(planned, start=1):
             pet_name = task.pet.name if task.pet else "—"
-            st.write(f"{i}. **{task.title}** — {task.duration_minutes} min — {pet_name}")
+            plan_rows.append(
+                {
+                    "#": i,
+                    "Task": task.title,
+                    "Minutes": task.duration_minutes,
+                    "Priority": task.priority,
+                    "Pet": pet_name,
+                }
+            )
+        st.table(plan_rows)
+        st.caption("Order follows **priority** (greedy fit to your time budget), not clock time.")
+        with st.expander("Same plan sorted by clock time"):
+            st.table(
+                [
+                    {
+                        "When": (
+                            task.due.strftime("%H:%M")
+                            if task.due and task.due.date() == today
+                            else (task.time_str or "—")
+                        ),
+                        "Task": task.title,
+                        "Pet": task.pet.name if task.pet else "—",
+                    }
+                    for task in scheduler.sort_by_time(list(planned))
+                ]
+            )
     else:
-        st.info("No tasks fit or no pending tasks.")
+        st.info("No tasks fit or no pending tasks for today.")
     with st.expander("Planner notes"):
         for line in msgs:
             st.caption(line)
