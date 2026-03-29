@@ -1,68 +1,12 @@
-"""CLI demo: verify PawPal+ scheduling, sorting, filtering, and time conflicts."""
+"""CLI demo: verify PawPal+ scheduling, sorting, filtering, conflicts, and formatting."""
 
 from __future__ import annotations
 
 from datetime import date, datetime, time
 
+from tabulate import tabulate
+
 from pawpal_system import Owner, Pet, Scheduler, Task
-
-
-def print_schedule_table(
-    planned: list[Task],
-    *,
-    title: str,
-    subtitle: str,
-) -> int:
-    """Print an aligned table; return total minutes planned."""
-    headers = ("#", "Task", "When", "Category", "Dur", "Pet", "Pri")
-    rows: list[list[str]] = []
-    total_min = 0
-    for i, task in enumerate(planned, start=1):
-        total_min += task.duration_minutes
-        pet = task.pet.name if task.pet else "—"
-        time_cell = (
-            task.due.strftime("%H:%M") if task.due else (task.time_str or "—")
-        )
-        rows.append(
-            [
-                str(i),
-                task.title,
-                time_cell,
-                task.category or "—",
-                f"{task.duration_minutes} min",
-                pet,
-                str(task.priority),
-            ]
-        )
-
-    table = [headers, *rows]
-    widths = [
-        max(len(table[r][c]) for r in range(len(table)))
-        for c in range(len(headers))
-    ]
-
-    def line(cells: list[str], sep: str = " │ ") -> str:
-        parts = [cells[i].ljust(widths[i]) for i in range(len(cells))]
-        return sep.join(parts)
-
-    rule = "─" * (sum(widths) + 3 * (len(headers) - 1))
-
-    print()
-    print(f"  {title}")
-    print(f"  {subtitle}")
-    print(f"  ┌{rule}┐")
-    print(f"  │ {line(headers)} │")
-    print(f"  ├{rule}┤")
-    if not rows:
-        print(f"  │ {'(no tasks scheduled)'.ljust(sum(widths) + 3 * (len(headers) - 1))} │")
-    else:
-        for row in rows:
-            print(f"  │ {line(row)} │")
-    print(f"  └{rule}┘")
-    if planned:
-        print(f"  Total: {total_min} min  ·  {len(planned)} task(s)")
-    print()
-    return total_min
 
 
 def main() -> None:
@@ -79,7 +23,6 @@ def main() -> None:
     def at(hour: int, minute: int = 0) -> datetime:
         return datetime.combine(today, time(hour, minute))
 
-    # Intentionally out of chronological order (by due / time_str)
     luna.add_task(
         Task(
             "Afternoon nap check",
@@ -116,8 +59,6 @@ def main() -> None:
             time_str="21:00",
         )
     )
-
-    # Same start time, different pets — overlapping intervals (Step 4)
     luna.add_task(
         Task(
             "Brush fur",
@@ -144,12 +85,30 @@ def main() -> None:
     pending_only = scheduler.filter_tasks(all_tasks, status="pending")
     print(f"  Count: {len(pending_only)}")
 
-    print("\n  --- Sort by time (due / HH:MM) ---")
+    print("\n  --- Priority → time (smart view) ---")
+    pri_time = scheduler.sort_by_priority_then_time(pending_only)
+    pt_rows = [
+        [
+            t.priority_emoji(),
+            t.priority_label(),
+            t.due.strftime("%H:%M") if t.due else (t.time_str or "—"),
+            t.title,
+            t.pet.name if t.pet else "—",
+        ]
+        for t in pri_time
+    ]
+    print(tabulate(pt_rows, headers=["", "Priority", "When", "Task", "Pet"], tablefmt="simple"))
+
+    print("\n  --- Sort by time only ---")
     by_time = scheduler.sort_by_time(pending_only)
     for t in by_time:
         tlabel = t.due.strftime("%H:%M") if t.due else t.time_str or "—"
         pet = t.pet.name if t.pet else "—"
         print(f"    {tlabel}  {t.title}  ({pet})")
+
+    slot = scheduler.next_available_slot(owner, today, 30)
+    print("\n  --- Next 30-minute opening ---")
+    print(f"    {slot.strftime('%H:%M')}" if slot else "    (none in 06:00–22:00 window)")
 
     print("\n  --- Time overlap warnings ---")
     overlap_msgs = scheduler.detect_time_overlaps(pending_only, plan_date=today)
@@ -161,13 +120,30 @@ def main() -> None:
 
     planned, messages = scheduler.build_daily_plan(owner, plan_date=today)
 
-    print_schedule_table(
-        planned,
-        title=f"Today's Schedule — {today.isoformat()}",
-        subtitle=f"{owner.name}  ·  {owner.available_minutes} min available today",
+    print(f"\n  Today's Schedule — {today.isoformat()}  |  {owner.name}  |  {owner.available_minutes} min available")
+    plan_rows = []
+    for i, task in enumerate(planned, start=1):
+        when = task.due.strftime("%H:%M") if task.due else (task.time_str or "—")
+        plan_rows.append(
+            [
+                i,
+                f"{task.priority_emoji()} {task.priority_label()}",
+                task.title,
+                when,
+                task.category or "—",
+                f"{task.duration_minutes} min",
+                task.pet.name if task.pet else "—",
+            ]
+        )
+    print(
+        tabulate(
+            plan_rows,
+            headers=["#", "Priority", "Task", "When", "Category", "Dur", "Pet"],
+            tablefmt="rounded_outline",
+        )
     )
 
-    print("  Planner notes")
+    print("\n  Planner notes")
     print("  " + "·" * 48)
     for line in messages:
         print(f"    • {line}")

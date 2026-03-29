@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 from itertools import combinations
+from pathlib import Path
 from typing import Any
 
 
@@ -54,6 +56,80 @@ class Owner:
         for pet in self.pets:
             out.extend(pet.tasks)
         return out
+
+    def save_to_json(self, path: str | Path) -> None:
+        """Serialize this owner (pets and nested tasks) to a UTF-8 JSON file."""
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with p.open("w", encoding="utf-8") as f:
+            json.dump(_owner_to_dict(self), f, indent=2)
+
+    @classmethod
+    def load_from_json(cls, path: str | Path) -> Owner:
+        """Load an owner graph from JSON written by :meth:`save_to_json`."""
+        p = Path(path)
+        with p.open(encoding="utf-8") as f:
+            data = json.load(f)
+        return _owner_from_dict(data)
+
+
+def _owner_to_dict(owner: Owner) -> dict[str, Any]:
+    return {
+        "name": owner.name,
+        "available_minutes": owner.available_minutes,
+        "preferences": dict(owner.preferences),
+        "pets": [_pet_to_dict(p) for p in owner.pets],
+    }
+
+
+def _pet_to_dict(pet: Pet) -> dict[str, Any]:
+    return {
+        "name": pet.name,
+        "species": pet.species,
+        "notes": pet.notes,
+        "tasks": [_task_to_dict(t) for t in pet.tasks],
+    }
+
+
+def _task_to_dict(task: Task) -> dict[str, Any]:
+    return {
+        "title": task.title,
+        "category": task.category,
+        "duration_minutes": task.duration_minutes,
+        "priority": task.priority,
+        "due": task.due.isoformat() if task.due else None,
+        "time_str": task.time_str,
+        "recurrence": task.recurrence,
+        "status": task.status,
+    }
+
+
+def _owner_from_dict(data: dict[str, Any]) -> Owner:
+    owner = Owner(
+        name=data["name"],
+        available_minutes=int(data.get("available_minutes", 0)),
+        preferences=dict(data.get("preferences", {})),
+    )
+    for pd in data.get("pets", []):
+        pet = Pet(
+            name=pd["name"],
+            species=pd.get("species", ""),
+            notes=pd.get("notes", ""),
+        )
+        owner.register_pet(pet)
+        for td in pd.get("tasks", []):
+            t = Task(
+                title=td["title"],
+                category=td.get("category", ""),
+                duration_minutes=int(td.get("duration_minutes", 0)),
+                priority=int(td.get("priority", 0)),
+                due=datetime.fromisoformat(td["due"]) if td.get("due") else None,
+                time_str=td.get("time_str", ""),
+                recurrence=td.get("recurrence", ""),
+                status=td.get("status", "pending"),
+            )
+            pet.add_task(t)
+    return owner
 
 
 @dataclass
@@ -167,6 +243,22 @@ class Task:
         """Return sort key: higher priority, shorter duration, then title."""
         return (-self.priority, self.duration_minutes, self.title)
 
+    def priority_label(self) -> str:
+        """Human-readable priority (1–3 → Low / Medium / High)."""
+        if self.priority >= 3:
+            return "High"
+        if self.priority == 2:
+            return "Medium"
+        return "Low"
+
+    def priority_emoji(self) -> str:
+        """Emoji for UI: high=red, medium=yellow, low=green."""
+        if self.priority >= 3:
+            return "🔴"
+        if self.priority == 2:
+            return "🟡"
+        return "🟢"
+
     def instances_for_date(self, target: date) -> list[Task]:
         """Expand recurrence into task instances for the given date."""
         if self.status == "done":
@@ -220,6 +312,58 @@ class Scheduler:
     def sort_by_time(self, tasks: list[Task]) -> list[Task]:
         """Return a new list sorted by clock time using ``Task.time_sort_key`` (stable by title)."""
         return sorted(tasks, key=lambda t: t.time_sort_key())
+
+    def sort_by_priority_then_time(self, tasks: list[Task]) -> list[Task]:
+        """Sort by higher priority first, then by clock time (``time_sort_key``)."""
+        return sorted(tasks, key=lambda t: (-t.priority,) + t.time_sort_key())
+
+    def next_available_slot(
+        self,
+        owner: Owner,
+        day: date,
+        duration_minutes: int,
+        *,
+        day_start_hour: int = 6,
+        day_end_hour: int = 22,
+    ) -> datetime | None:
+        """Earliest start on ``day`` where ``duration_minutes`` fits between timed pending tasks.
+
+        Scans the window ``[day_start_hour, day_end_hour)`` and skips overlaps using merged busy
+        intervals from tasks that have a time on ``day`` (same rules as overlap detection).
+        """
+        dur = timedelta(minutes=max(0, duration_minutes))
+        window_start = datetime.combine(day, datetime.min.time().replace(hour=day_start_hour))
+        window_end = datetime.combine(day, datetime.min.time().replace(hour=day_end_hour))
+        if window_start + dur > window_end:
+            return None
+
+        pending = [t for t in owner.all_tasks() if t.status != "done"]
+        intervals: list[tuple[datetime, datetime]] = []
+        for t in pending:
+            iv = _interval_for_day(t, day)
+            if iv:
+                intervals.append(iv)
+        intervals.sort(key=lambda x: x[0])
+        merged: list[tuple[datetime, datetime]] = []
+        for s, e in intervals:
+            if not merged:
+                merged.append((s, e))
+            else:
+                ls, le = merged[-1]
+                if s < le:
+                    merged[-1] = (ls, max(le, e))
+                else:
+                    merged.append((s, e))
+
+        candidate = window_start
+        for s, e in merged:
+            if candidate + dur <= s:
+                return candidate
+            if e > candidate:
+                candidate = e
+        if candidate + dur <= window_end:
+            return candidate
+        return None
 
     def filter_tasks(
         self,

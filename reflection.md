@@ -120,8 +120,29 @@ The **separation** of `pawpal_system.py` from UI made it possible to **prove** b
 
 **b. What you would improve**
 
-I would add **explicit time slots** (start/end) for each planned task, **edit/remove task** flows in the UI, and **persistence** (file or DB) so session loss on refresh does not drop data.
+I would add **explicit time slots** (start/end) for each planned task, **edit/remove task** flows in the UI, and optional **cloud sync** beyond local `data.json`.
 
 **c. Key takeaway**
 
 Designing with AI works best when I treat the model as a **strong junior implementer**: I supply **architecture, invariants, and tests**; AI accelerates drafting, but **I** decide what “correct” means and prove it before shipping.
+
+---
+
+## 6. Prompt comparison (Challenge 5 — two models on one task)
+
+**Prompt used (example):** “Implement weekly recurrence follow-up for `Task.mark_complete` using `timedelta`, without breaking daily recurrence.”
+
+| Model (example) | What it did well | What I changed or rejected |
+|-----------------|------------------|----------------------------|
+| *Style A (inline)* | Fast single-method patch with `timedelta(weeks=1)`. | Hard to test branches in isolation; easy to confuse `date` vs `datetime`. |
+| *Style B (modular)* | Suggested `_next_occurrence_due()` and keeping `replace` + `pet.add_task` separate. | **Adopted** — matches the codebase and pytest style. |
+
+**Takeaway:** The more **Pythonic** one-liner was **not** the most maintainable here; **modular** scheduling logic won because I could **verify** daily vs weekly with small tests.
+
+**Your own comparison:** Run the same prompt in two tools (e.g. OpenAI vs Claude or Gemini), then fill:
+
+| Model | Strength | Weakness |
+|-------|----------|----------|
+| | | |
+| | | |
+| **More modular / testable** | | |

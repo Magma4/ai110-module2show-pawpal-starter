@@ -1,19 +1,30 @@
+from pathlib import Path
+
 import streamlit as st
 from datetime import date, datetime
 
 from pawpal_system import Owner, Pet, Scheduler, Task
+
+DATA_PATH = Path("data.json")
 
 st.set_page_config(page_title="PawPal+", page_icon="🐾", layout="centered")
 
 st.title("🐾 PawPal+")
 
 st.caption(
-    "Plan care from your owner profile, pets, and tasks. Data stays in this browser tab until you refresh."
+    "Plan care from your owner profile, pets, and tasks. "
+    "Your data is saved to **data.json** in the app working directory when possible."
 )
 
-# --- Session "memory": one Owner for the whole session (survives reruns) ---
+# --- Session memory + optional JSON persistence ---
 if "owner" not in st.session_state:
-    st.session_state.owner = Owner("Jordan", available_minutes=60)
+    if DATA_PATH.exists():
+        try:
+            st.session_state.owner = Owner.load_from_json(DATA_PATH)
+        except (OSError, ValueError, KeyError):
+            st.session_state.owner = Owner("Jordan", available_minutes=60)
+    else:
+        st.session_state.owner = Owner("Jordan", available_minutes=60)
 
 owner: Owner = st.session_state.owner
 today = date.today()
@@ -141,11 +152,11 @@ for pet in owner.pets:
         when = t.due.strftime("%Y-%m-%d %H:%M") if t.due else (t.time_str or "—")
         rows.append(
             {
+                "Pri": f"{t.priority_emoji()} {t.priority_label()}",
                 "Pet": pet.name,
                 "Title": t.title,
                 "When": when,
                 "Minutes": t.duration_minutes,
-                "Priority": t.priority,
                 "Repeat": t.recurrence or "—",
                 "Status": t.status,
             }
@@ -160,12 +171,12 @@ st.divider()
 st.subheader("Smart scheduling")
 
 pending = scheduler.filter_tasks(owner.all_tasks(), status="pending")
-by_time = scheduler.sort_by_time(pending)
+by_pri_time = scheduler.sort_by_priority_then_time(pending)
 
-if by_time:
-    st.markdown("**Pending tasks by time today**")
+if by_pri_time:
+    st.markdown("**Pending tasks — priority first, then time**")
     view = []
-    for t in by_time:
+    for t in by_pri_time:
         pet_name = t.pet.name if t.pet else "—"
         if t.due and t.due.date() == today:
             when = t.due.strftime("%H:%M")
@@ -175,16 +186,25 @@ if by_time:
             when = t.time_str or "—"
         view.append(
             {
+                "Pri": f"{t.priority_emoji()} {t.priority_label()}",
                 "When": when,
                 "Task": t.title,
                 "Pet": pet_name,
                 "Min": t.duration_minutes,
-                "Pri": t.priority,
             }
         )
     st.table(view)
 else:
     st.caption("No pending tasks to sort.")
+
+slot30 = scheduler.next_available_slot(owner, today, 30)
+if slot30:
+    st.info(
+        f"**Next 30‑min opening:** {slot30.strftime('%H:%M')} today "
+        "(based on timed tasks between 06:00–22:00)."
+    )
+else:
+    st.caption("No contiguous 30‑minute slot found in the default day window.")
 
 overlap_msgs = scheduler.detect_time_overlaps(pending, plan_date=today)
 if overlap_msgs:
@@ -225,9 +245,9 @@ if "last_plan" in st.session_state:
             plan_rows.append(
                 {
                     "#": i,
+                    "Pri": f"{task.priority_emoji()} {task.priority_label()}",
                     "Task": task.title,
                     "Minutes": task.duration_minutes,
-                    "Priority": task.priority,
                     "Pet": pet_name,
                 }
             )
@@ -253,3 +273,9 @@ if "last_plan" in st.session_state:
     with st.expander("Planner notes"):
         for line in msgs:
             st.caption(line)
+
+# Persist owner graph for next session (best-effort)
+try:
+    owner.save_to_json(DATA_PATH)
+except OSError:
+    pass
