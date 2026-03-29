@@ -61,8 +61,13 @@ Yes — small refinements after the review, still aligned with the same UML.
 
 **b. Tradeoffs**
 
-- Describe one tradeoff your scheduler makes.
-- Why is that tradeoff reasonable for this scenario?
+**Tradeoff: pairwise overlap scan vs. a single sweep**
+
+`detect_time_overlaps` compares every pair of tasks that have a clock time on the plan day using `itertools.combinations` (O(n²) in the number of timed tasks). A more advanced approach is to sort intervals by start time and sweep once (O(n log n)), which scales better with many tasks.
+
+**Why this is reasonable here:** A typical owner has a small number of timed tasks per day, so clarity and a few lines of code matter more than asymptotic savings. The method only **returns warning strings** and never raises, so the UI stays safe even if the list grows. The check also treats **interval overlap** (shared minutes), not only identical start times—but tasks **without** a `due` or `time_str` for that day are skipped, so “floating” tasks never get a false overlap.
+
+**Readability vs. “Pythonic” compression:** Nested `for i/j` loops could be replaced by `combinations` alone; keeping the overlap condition `(s1 < e2 and s2 < e1) or (s1 == s2)` explicit preserves the half-open interval rule and the “same instant” edge case for zero-length blocks without hiding logic in a one-liner.
 
 ---
 
