@@ -46,9 +46,9 @@ Yes — small refinements after the review, still aligned with the same UML.
 
 - **Concrete behavior for thin methods:** Implemented `set_available_time` and `list_pets` with straightforward field reads/writes; implemented `mark_complete` and a minimal `sort_key` so ordering has a defined key before the full scheduler exists.
 
-- **No second task list on `Pet` yet:** The review noted that the UML shows Pet → Task from both sides. For now we keep a single link `Task → Pet` only, to avoid keeping `pet.tasks` and `task.pet` in sync manually; we can add `Pet.tasks` or a repository later if the app needs fast “all tasks for this pet” queries.
+- **`Pet.tasks` added later:** The implementation now keeps `tasks` on `Pet` with `add_task` / `remove_task` synchronized with `Task.pet`, so the object graph matches the UML and the UI can list tasks per pet.
 
-- **Scheduler left as stubs:** `build_daily_plan` and `detect_conflicts` remain unimplemented until scheduling rules are defined, so we do not pretend a policy exists yet.
+- **Scheduler fully implemented:** `build_daily_plan`, `detect_conflicts`, `sort_by_time`, `filter_tasks`, and `detect_time_overlaps` were added incrementally after the skeleton phase, with tests and CLI verification before the Streamlit polish.
 
 ---
 
@@ -56,8 +56,9 @@ Yes — small refinements after the review, still aligned with the same UML.
 
 **a. Constraints and priorities**
 
-- What constraints does your scheduler consider (for example: time, priority, preferences)?
-- How did you decide which constraints mattered most?
+The scheduler considers **(1) owner time budget** (`available_minutes`), **(2) task priority and duration** (via `sort_key` for greedy packing), **(3) calendar-day relevance** (`instances_for_date`, `plan_date`), and **(4) optional clock times** for sorting and overlap checks (`due`, `time_str`). **Preferences** on `Owner` are modeled but not heavily weighted in code yet.
+
+**Priority order:** Fitting the **daily minute budget** while preferring **higher priority** tasks first was chosen as the main tradeoff for `build_daily_plan` because it matches how an overwhelmed owner thinks (“do the important stuff if time runs out”). **Clock-based ordering** is surfaced separately (`sort_by_time`) so the UI can show “when things ideally happen” without changing the greedy policy.
 
 **b. Tradeoffs**
 
@@ -75,13 +76,27 @@ Yes — small refinements after the review, still aligned with the same UML.
 
 **a. How you used AI**
 
-- How did you use AI tools during this project (for example: design brainstorming, debugging, refactoring)?
-- What kinds of prompts or questions were most helpful?
+I used AI (including VS Code **Copilot** Chat and inline prompts) to **brainstorm UML**, **scaffold dataclasses and method stubs**, **draft pytest cases**, **suggest Mermaid syntax**, and **review** overlap and recurrence edge cases. The most helpful prompts were **file-scoped** (`#file:pawpal_system.py`) and **behavior-specific** (“what edge cases for overlap on the same day?”), because they grounded suggestions in real code instead of generic Python trivia.
 
-**b. Judgment and verification**
+**b. Judgment and verification — VS Code Copilot**
 
-- Describe one moment where you did not accept an AI suggestion as-is.
-- How did you evaluate or verify what the AI suggested?
+**Which Copilot features were most effective for the scheduler?**
+
+- **Chat with codebase context** — Quick checks on where to put overlap logic (on `Scheduler` vs `Task`) and how to return **warnings** instead of raising.
+- **Inline / selection edits** — Small refactors (e.g., `itertools.combinations`, `timedelta` for next due) with immediate diff review.
+- **Generate tests** — Starting points for `pytest` cases, which I then tightened with concrete dates and assertions.
+
+**One AI suggestion I rejected or modified**
+
+Early on, Copilot sometimes suggested **duplicating** a full `tasks` list on both `Pet` and `Owner` without a single source of truth. I **rejected** keeping only free-floating tasks and instead standardized on **`Pet.add_task`** + **`Owner.all_tasks()`** so relationships stay consistent. I verified by **running tests** and **stepping through `main.py`** after each change.
+
+**How separate chat sessions helped**
+
+Using **different chats for design vs implementation vs testing** reduced context mixing: one thread kept UML and naming stable, another focused on **pytest** failures, and another on **Streamlit** session state. That made it easier to **paste errors** and **accept or reject** suggestions without losing the architectural thread.
+
+**Lead architect with powerful AI**
+
+The model is fast at boilerplate and alternatives, but **I** own **constraints, public APIs, and tradeoffs** (e.g., greedy priority vs chronological display). Being the lead architect means **directing** Copilot with precise files and goals, **verifying** with tests and demos, and **rejecting** clever code that obscures behavior—speed without judgment would have produced a larger, harder-to-trust scheduler.
 
 ---
 
@@ -89,13 +104,11 @@ Yes — small refinements after the review, still aligned with the same UML.
 
 **a. What you tested**
 
-- What behaviors did you test?
-- Why were these tests important?
+I tested **owner/pet/task wiring**, **`filter_tasks`**, **`sort_by_time`** (including mixed `due` and `time_str`), **daily/weekly recurrence** after `mark_complete`, **time overlaps** (duplicate start, partial overlap, adjacent non-overlap, done tasks ignored), **empty owner/plan**, and **`detect_conflicts`** indirectly through behavior. These matter because they guard the **behaviors users see** in both **CLI** and **Streamlit**, and because scheduler bugs are subtle (off-by-one days, half-open intervals).
 
 **b. Confidence**
 
-- How confident are you that your scheduler works correctly?
-- What edge cases would you test next if you had more time?
+I am **reasonably confident** (about **4/5**) that the scheduler matches intent for small household task counts. If I had more time, I would add **property-based tests** for overlap, **Streamlit integration** smoke tests, and scenarios with **many pets** and **time zones** if `due` ever stores non-local datetimes.
 
 ---
 
@@ -103,12 +116,12 @@ Yes — small refinements after the review, still aligned with the same UML.
 
 **a. What went well**
 
-- What part of this project are you most satisfied with?
+The **separation** of `pawpal_system.py` from UI made it possible to **prove** behavior in **pytest** and **`main.py`** before polishing Streamlit. The **warning-only** conflict API kept the app resilient.
 
 **b. What you would improve**
 
-- If you had another iteration, what would you improve or redesign?
+I would add **explicit time slots** (start/end) for each planned task, **edit/remove task** flows in the UI, and **persistence** (file or DB) so session loss on refresh does not drop data.
 
 **c. Key takeaway**
 
-- What is one important thing you learned about designing systems or working with AI on this project?
+Designing with AI works best when I treat the model as a **strong junior implementer**: I supply **architecture, invariants, and tests**; AI accelerates drafting, but **I** decide what “correct” means and prove it before shipping.
