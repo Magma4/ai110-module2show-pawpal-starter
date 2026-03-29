@@ -18,13 +18,19 @@ class Owner:
         """Persist or validate owner profile (implementation later)."""
         pass
 
+    def register_pet(self, pet: Pet) -> None:
+        """Link a pet to this owner and keep both sides consistent."""
+        pet.owner = self
+        if pet not in self.pets:
+            self.pets.append(pet)
+
     def set_available_time(self, minutes: int) -> None:
         """Set the scheduling time budget for the current day."""
-        pass
+        self.available_minutes = minutes
 
     def list_pets(self) -> list[Pet]:
         """Return pets managed by this owner."""
-        pass
+        return list(self.pets)
 
 
 @dataclass
@@ -52,15 +58,15 @@ class Task:
 
     def mark_complete(self) -> None:
         """Mark this task as done."""
-        pass
+        self.status = "done"
 
     def sort_key(self) -> tuple[Any, ...]:
         """Return a comparable key for ordering (priority, due time, etc.)."""
-        pass
+        return (-self.priority, self.title)
 
-    def instances_for_date(self, target: date) -> list[Task]:
+    def instances_for_date(self, _target: date) -> list[Task]:
         """Expand recurrence into concrete tasks for a given calendar date."""
-        pass
+        return []
 
 
 class Scheduler:
