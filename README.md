@@ -34,6 +34,20 @@ The logic layer in `pawpal_system.py` adds lightweight “intelligence” on top
 
 Try the CLI demo with `python main.py` and the automated checks with `python -m pytest`.
 
+## Testing PawPal+
+
+Run the test suite from the project root:
+
+```bash
+python -m pytest
+```
+
+Use `python -m pytest -v` to print each test name as it runs.
+
+The suite in `tests/test_pawpal.py` exercises **owner / pet / task** relationships, **filtering** by status and pet name, **chronological sorting** (`sort_by_time`), **daily and weekly recurrence** (next occurrence after `mark_complete`), **time overlap detection** (duplicate starts, partial overlap, back-to-back non-overlap, done tasks skipped), and **empty** edge cases (no pets, empty plan).
+
+**Confidence level (reliability):** ★★★★☆ **(4 / 5)** — Domain logic and scheduler edge cases are well covered by automated tests; remaining gaps include full Streamlit interaction tests and very large task lists in performance scenarios.
+
 ## Getting started
 
 ### Setup
