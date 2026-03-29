@@ -15,7 +15,7 @@ class Owner:
     pets: list[Pet] = field(default_factory=list)
 
     def register(self) -> None:
-        """Validate owner profile (extend later for persistence)."""
+        """Reject empty owner names."""
         if not str(self.name).strip():
             raise ValueError("Owner name cannot be empty")
 
@@ -26,17 +26,17 @@ class Owner:
             self.pets.append(pet)
 
     def set_available_time(self, minutes: int) -> None:
-        """Set the scheduling time budget for the current day."""
+        """Store minutes available for scheduling today."""
         if minutes < 0:
             raise ValueError("available_minutes cannot be negative")
         self.available_minutes = minutes
 
     def list_pets(self) -> list[Pet]:
-        """Return pets managed by this owner."""
+        """Return a copy of this owner's pet list."""
         return list(self.pets)
 
     def all_tasks(self) -> list[Task]:
-        """All tasks attached to this owner's pets (pet order, then task order)."""
+        """List every task on every pet, in pet then task order."""
         out: list[Task] = []
         for pet in self.pets:
             out.extend(pet.tasks)
@@ -52,14 +52,14 @@ class Pet:
     tasks: list[Task] = field(default_factory=list)
 
     def update_profile(self, **kwargs: Any) -> None:
-        """Update allowed fields from keyword arguments."""
+        """Apply name, species, or notes from keyword arguments."""
         allowed = {"name", "species", "notes"}
         for key, value in kwargs.items():
             if key in allowed:
                 setattr(self, key, value)
 
     def add_task(self, task: Task) -> None:
-        """Attach a task to this pet; removes it from another pet if needed."""
+        """Attach a task to this pet, moving it from another pet if needed."""
         if task.pet is not None and task.pet is not self:
             task.pet.remove_task(task)
         task.pet = self
@@ -67,7 +67,7 @@ class Pet:
             self.tasks.append(task)
 
     def remove_task(self, task: Task) -> None:
-        """Detach a task from this pet."""
+        """Remove a task from this pet and clear its pet link."""
         if task in self.tasks:
             self.tasks.remove(task)
         if task.pet is self:
@@ -87,27 +87,28 @@ class Task:
 
     @property
     def frequency(self) -> str:
-        """Alias for recurrence (how often the task repeats)."""
+        """Return the recurrence string (same as ``recurrence``)."""
         return self.recurrence
 
     @frequency.setter
     def frequency(self, value: str) -> None:
+        """Set recurrence using the frequency alias."""
         self.recurrence = value
 
     def mark_complete(self) -> None:
-        """Mark this task as done."""
+        """Set status to done."""
         self.status = "done"
 
     def mark_pending(self) -> None:
-        """Mark this task as not yet done."""
+        """Set status to pending."""
         self.status = "pending"
 
     def sort_key(self) -> tuple[Any, ...]:
-        """Comparable key: higher priority first, then shorter duration, then title."""
+        """Return sort key: higher priority, shorter duration, then title."""
         return (-self.priority, self.duration_minutes, self.title)
 
     def instances_for_date(self, target: date) -> list[Task]:
-        """Concrete tasks that apply on ``target`` (handles recurrence)."""
+        """Expand recurrence into task instances for the given date."""
         if self.status == "done":
             return []
         r = (self.recurrence or "").strip().lower()
@@ -132,11 +133,11 @@ class Scheduler:
     """Plans daily care from owner constraints and tasks."""
 
     def tasks_for_owner(self, owner: Owner) -> list[Task]:
-        """Flatten all tasks from every pet belonging to ``owner``."""
+        """Return all tasks from every pet under this owner."""
         return owner.all_tasks()
 
     def collect_tasks_for_day(self, owner: Owner, day: date) -> list[Task]:
-        """Expand each stored task into zero or more instances for ``day``."""
+        """Collect concrete task instances for a calendar day."""
         concrete: list[Task] = []
         for pet in owner.pets:
             for task in pet.tasks:
@@ -150,7 +151,7 @@ class Scheduler:
         *,
         plan_date: date | None = None,
     ) -> tuple[list[Task], list[str]]:
-        """Return ordered tasks that fit ``owner.available_minutes`` and explanation lines."""
+        """Build a greedy daily plan and human-readable notes."""
         day = plan_date or date.today()
         if tasks is None:
             candidates = self.collect_tasks_for_day(owner, day)
@@ -191,7 +192,7 @@ class Scheduler:
         return planned, messages
 
     def detect_conflicts(self, owner: Owner, tasks: list[Task] | None = None) -> list[str]:
-        """Describe conflicts such as total work exceeding available time."""
+        """Return messages when pending work exceeds available time."""
         if tasks is None:
             tasks = self.tasks_for_owner(owner)
         total = sum(max(0, t.duration_minutes) for t in tasks if t.status != "done")
